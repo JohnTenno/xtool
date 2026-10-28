@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from zipfile import ZipFile
 
-from watch_connection import WatchConnection
+from watch_connection import CompanionWatchLockdownClient, WatchConnection
 from watch_device import package_info
 
 
@@ -55,6 +55,39 @@ class ConnectionCleanupTests(unittest.IsolatedAsyncioTestCase):
         proxy.start_forwarding_service_port.assert_not_awaited()
         proxy.close.assert_awaited_once()
         phone.close.assert_awaited_once()
+
+    async def test_rsd_tunnel_opens_forwarded_ports_over_tcp(self):
+        phone = AsyncMock()
+        proxy = AsyncMock()
+        proxy.list.return_value = ["watch"]
+        proxy.start_forwarding_service_port.return_value = 5555
+        watch = AsyncMock()
+        watch.paired = True
+        watch.all_values = {"DeviceClass": "Watch"}
+        tcp = AsyncMock()
+        with patch("watch_connection.RemoteServiceDiscoveryService", return_value=phone), \
+                patch("watch_connection.create_using_usbmux", AsyncMock(side_effect=AssertionError("no USB"))), \
+                patch("watch_connection.CompanionProxyService", return_value=proxy), \
+                patch("watch_connection.ServiceConnection.create_using_tcp", tcp), \
+                patch("watch_connection.CompanionWatchLockdownClient.create", AsyncMock(return_value=watch)) as create:
+            async with WatchConnection(Path("unused"), rsd=("fd00::1", 58783)) as connected:
+                self.assertIs(connected, watch)
+        phone.connect.assert_awaited_once()
+        tcp.assert_awaited_once_with("fd00::1", 5555, ssl_context=None, strip_ssl=False)
+        self.assertNotIn("system_buid", create.await_args.kwargs)
+
+
+class ServiceForwardingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_service_tls_context_is_passed_to_the_forwarded_port(self):
+        client = CompanionWatchLockdownClient.__new__(CompanionWatchLockdownClient)
+        client.proxy = AsyncMock()
+        client.proxy.start_forwarding_service_port.return_value = 6000
+        client.ports = set()
+        client.open_port = AsyncMock(return_value="connection")
+        result = await client.create_service_connection(1234, ssl_context="tls")
+        self.assertEqual(result, "connection")
+        client.open_port.assert_awaited_once_with(6000, "tls", False)
+        self.assertEqual(client.ports, {1234})
 
 
 if __name__ == "__main__":

@@ -30,7 +30,8 @@ def package_info(package: Path):
 
 async def main(args):
     info = package_info(args.install) if args.install else None
-    async with WatchConnection(args.state_directory, pair_watch=args.pair) as watch:
+    rsd = (args.rsd[0], int(args.rsd[1])) if args.rsd else None
+    async with WatchConnection(args.state_directory, pair_watch=args.pair, rsd=rsd) as watch:
         enabled = await watch.get_developer_mode_status()
         print(json.dumps({"watch_connected": True, "developer_mode": enabled}), flush=True)
         if args.device_info:
@@ -73,6 +74,8 @@ def run():
     parser.add_argument("--reveal-developer-mode", action="store_true",
                         help="Show the Developer Mode switch; does not enable or confirm it")
     parser.add_argument("--install", type=Path, help="Install a signed Watch .app or .ipa")
+    parser.add_argument("--rsd", nargs=2, metavar=("HOST", "PORT"),
+                        help="Reach the iPhone through a Wi-Fi RSD tunnel (remote start-tunnel) instead of USB")
     args = parser.parse_args()
     args.state_directory.mkdir(parents=True, exist_ok=True)
     try:
